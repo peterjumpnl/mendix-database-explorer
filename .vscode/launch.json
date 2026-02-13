@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch StudioPro with debugger attached",
+            "type": "msedge",
+            "useWebView": true,
+            "runtimeExecutable": "",
+            "runtimeArgs": ["--enable-extension-development", "--enable-web-extensions"],
+            "request": "launch",
+            "webRoot": "${workspaceFolder}/dist/mendix-documenter"
+        }
+    ]
+}
