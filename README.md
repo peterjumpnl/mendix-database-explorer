@@ -1,86 +1,55 @@
-# Mendix Documenter Extension
+# Database Explorer
 
-A Mendix Studio Pro extension that adds Markdown document support with a rich text editor.
-
-## Overview
-
-This extension demonstrates how to build custom document types in Mendix Studio Pro using the Web Extensibility API. It registers a new Markdown document type and provides a tab-based editor with MDXEditor for rich editing capabilities.
+A Mendix Studio Pro extension that provides a treeview pane for exploring the domain model structure of your app — modules, entities, attributes, and associations — at a glance.
 
 ## Features
 
-- **Custom Document Type**: Registers Markdown documents in the Mendix model
-- **Rich Editor**: Full-featured Markdown editor with toolbar
+- **Treeview navigation**: Browse modules → entities → attributes + associations in a collapsible tree
+- **Expand / Collapse all**: Quickly open or close the entire tree from the header toolbar
+- **Search**: Filter modules and entities by name
+- **Association support**: Displays both intra-module and cross-module associations with target entity info
+- **Attribute types**: Shows the Mendix attribute type next to each attribute name
+- **Open Domain Model**: Double-click any entity to open its module's domain model editor in Studio Pro
+- **Auto-refresh**: Reload the tree with a single click
 
 ## Architecture
 
-### Core Components
-
-- `src/main/index.ts` - Extension entry point, registers document type and editor
-- `src/ui/editor.tsx` - React component for the editor tab
-- `src/components/markdown-canvas/` - MDXEditor integration with save functionality
+```
+src/
+├── main/
+│   ├── index.ts          # Extension entry point — registers pane & menu
+│   └── style.css         # Base styles
+├── ui/
+│   └── pane.tsx          # React root for the pane
+├── components/
+│   └── database-explorer/
+│       ├── index.tsx      # DatabaseExplorer component (tree, icons, data fetching)
+│       └── database-explorer.css  # Tree & layout styles
+└── manifest.json          # Mendix component manifest
+```
 
 ### Key APIs Used
 
-- **Custom Blob Documents API**: Registers and manages Markdown documents
-- **UI Editors API**: Registers the editor as a tab interface
+- **Domain Models API** (`studioPro.app.model.domainModels`) — load domain models per module, read entities, attributes, associations, and cross-associations
+- **Projects API** (`studioPro.app.model.projects`) — list all modules in the app
+- **Panes API** (`studioPro.ui.panes`) — register and open the side pane
+- **Extensions Menu API** (`studioPro.ui.extensionsMenu`) — add a menu item to open the pane
+- **Editors API** (`studioPro.ui.editors`) — open the domain model editor on double-click
 
-## Build Process
+## Build
 
-The extension uses **esbuild** for fast bundling with custom plugins:
-
-### Entry Points & Manifest Relationship
-
-The build process defines entry points that map to the `manifest.json` configuration:
-
-```javascript
-// build-extension.mjs
-const entryPoints = [
-    { in: 'src/main/index.ts', out: 'main' },      // → main.js
-    { in: 'src/ui/editor.tsx', out: 'editor' }     // → editor.js
-]
+```bash
+npm run build        # Type-check + bundle
+npm run build:dev    # Type-check + bundle with watch mode
 ```
-
-These correspond to the manifest:
-```json
-{
-  "mendixComponent": {
-    "entryPoints": {
-      "main": "main.js",
-      "ui": {
-        "editor": "editor.js"
-      }
-    }
-  }
-}
-```
-
-### CSS Bundling
-
-CSS files are automatically bundled using the `bundleCssPlugin`:
-
-- **Collection**: All imported CSS files are collected during build
-- **Bundling**: Combined into a single `style.css` file in the output
-- **Injection**: Can auto-inject stylesheets into the document head
-- **Import**: Simply import CSS in your TypeScript files:
-  ```typescript
-  import "../main/style.css";
-  import "../components/markdown-canvas/markdown-canvas.css";
-  ```
 
 ### Build Pipeline
 
-1. **TypeScript Compilation**: Type checking with `tsc --noEmit`
-2. **esbuild Bundling**: Code splitting, tree shaking, asset optimization
-3. **CSS Bundling**: Combines all CSS into single file
-4. **Manifest Copy**: Copies `src/manifest.json` to output
-5. **App Deployment**: Copies built extension to Mendix app directory
-
-### Development
-
-```bash
-npm run build        # Production build
-npm run build:dev    # Development with watch mode
-```
+1. **TypeScript** — type checking via `tsc --noEmit`
+2. **esbuild** — bundles TS/TSX entry points into `main.js` and `pane.js`
+3. **CSS bundling** — all imported CSS files are combined into a single `style.css`
+4. **Manifest** — `src/manifest.json` is copied to the output directory
+5. **Deployment** — the built extension is copied to the configured Mendix app directory
 
 ### Configuration
 
@@ -90,43 +59,72 @@ Update `build-extension.mjs` to point to your Mendix app directory:
 const appDir = "path/to/your/mendix/app"
 ```
 
+### Entry Points & Manifest
+
+```json
+{
+  "mendixComponent": {
+    "entryPoints": {
+      "main": "main.js",
+      "ui": {
+        "pane": "pane.js"
+      }
+    }
+  }
+}
+```
+
 ## Key Implementation Details
 
-### Document Registration
+### Pane & Menu Registration (11.6+ API)
 
 ```typescript
-await studioPro.app.model.customBlobDocuments.registerDocumentType<MarkdownDocument>({
-    type: 'mendixdocumenter.MarkdownDocument',
-    readableTypeName: 'Markdown',
-    defaultContent: { content: '' }
+const paneHandle = await studioPro.ui.panes.register(
+    { title: "Database Explorer", initialPosition: "right" },
+    { componentName: "extension/database-explorer", uiEntrypoint: "pane" }
+);
+
+await studioPro.ui.extensionsMenu.add({
+    menuId: "database-explorer.MainMenu",
+    caption: "Database Explorer",
+    action: async () => {
+        studioPro.ui.panes.open(paneHandle);
+    }
 });
 ```
 
-### Editor Registration
+### Association Resolution
+
+Associations in the Mendix API reference parent and child entities by GUID. The extension builds an entity-ID-to-name mapping to resolve these into human-readable names:
 
 ```typescript
-await studioPro.ui.editors.registerEditorForCustomDocument({
-    documentType: 'mendixdocumenter.MarkdownDocument',
-    editorEntryPoint: 'editor',
-    editorKind: 'tab',
-    iconLight: markdownLightThemeIcon,
-    iconDark: markdownDarkThemeIcon
-});
+const entityIdToName: Record<string, string> = {};
+for (const entity of domainModel.entities) {
+    entityIdToName[entity.$ID] = entity.name;
+}
 ```
 
-### Content Persistence
+Both `associations` (intra-module) and `crossAssociations` (cross-module) are extracted from the domain model.
+
+### Open Domain Model on Double-Click
 
 ```typescript
-studioPro.app.model.customBlobDocuments.updateDocumentContent(documentId, { 
-    content: newContent 
-});
+await studioPro.ui.editors.editDocument(domainModelId);
 ```
+
+## Tech Stack
+
+- **Mendix Web Extensibility API** `v0.5.3-mendix.11.6.3`
+- **React 18** with hooks
+- **TypeScript 5**
+- **esbuild** for bundling
 
 ## Resources
 
-- [Mendix Web Extensibility API Getting Started](https://docs.mendix.com/apidocs-mxsdk/apidocs/web-extensibility-api-11/getting-started/)
-- [Custom Blob Document API](https://docs.mendix.com/apidocs-mxsdk/apidocs/web-extensibility-api-11/custom-blob-document-api/)
-- [MDXEditor Documentation](https://mdxeditor.dev/editor/docs/getting-started)
+- [Mendix Web Extensibility API — Getting Started](https://docs.mendix.com/apidocs-mxsdk/apidocs/web-extensibility-api-11/getting-started/)
+- [Model Access API](https://docs.mendix.com/apidocs-mxsdk/apidocs/web-extensibility-api-11/model-api/)
+- [Editor API — Open a Document](https://docs.mendix.com/apidocs-mxsdk/apidocs/web-extensibility-api-11/editor-api/)
+- [Menu API](https://docs.mendix.com/apidocs-mxsdk/apidocs/web-extensibility-api-11/menu-api/)
 
 ## License
 

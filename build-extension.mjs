@@ -3,7 +3,7 @@ import {copyToAppPlugin, copyManifestPlugin, commonConfig, bundleCssPlugin} from
 import parseArgs from "minimist"
 
 const outDir = `dist/database-explorer`
-const appDir = "D:\\Workstation\\low-code\\mendix\\TestMendixDocumenter-main"
+const appDir = "D:\\Workstation\\low-code\\mendix\\DatabaseExplorer-main"
 const extensionDirectoryName = "extensions"
 
 const entryPoints = [
