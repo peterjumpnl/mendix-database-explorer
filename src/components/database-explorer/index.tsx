@@ -1,13 +1,29 @@
 import React, { useEffect, useState } from "react";
 import { Primitives, ComponentContext, getStudioProApi } from "@mendix/extensions-api";
 import "./database-explorer.css";
+import collapseAllIcon from "./icons/CollapseAll.svg";
+import expandAllIcon from "./icons/ExpandAll.svg";
+import searchIcon from "./icons/Search.svg";
+import entityPersistableIcon from "./icons/EntityPersistable.svg";
+import entityNonPersistableIcon from "./icons/EntityNonPersistable.svg";
+import entityViewIcon from "./icons/EntityView.svg";
+import entityExternalIcon from "./icons/EntityExternal.svg";
+import groupedViewIcon from "../../rows-2.svg";
+import flatViewIcon from "../../text-align-justify.svg";
 
-const TableIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="2" y="2" width="12" height="12" rx="1" stroke="#0066cc" strokeWidth="1.5" fill="none"/>
-        <text x="8" y="11" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#0066cc">E</text>
-    </svg>
-);
+type EntityType = 'persistable' | 'non-persistable' | 'view' | 'external';
+type ViewMode = "grouped" | "flat";
+
+const TableIcon = ({ entityType }: { entityType: EntityType }) => {
+    const iconByType: Record<EntityType, string> = {
+        persistable: entityPersistableIcon,
+        "non-persistable": entityNonPersistableIcon,
+        view: entityViewIcon,
+        external: entityExternalIcon
+    };
+
+    return <img src={iconByType[entityType]} alt="" draggable={false} />;
+};
 
 const AttributeIcon = () => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -36,6 +52,7 @@ interface DatabaseExplorerProps {
 
 interface EntityInfo {
     name: string;
+    entityType: EntityType;
     attributes: { name: string; type: string }[];
     associations: { name: string; target: string; type: string }[];
 }
@@ -52,6 +69,7 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({ componentCon
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState<string>("");
+    const [viewMode, setViewMode] = useState<ViewMode>("grouped");
     const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
     const [expandedEntities, setExpandedEntities] = useState<Set<string>>(new Set());
 
@@ -118,6 +136,55 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({ componentCon
                     ...(domainModelData.crossAssociations || []).map(extractAssociation)
                 ];
 
+                const entitiesByName = new Map<string, any>(
+                    (domainModelData.entities || []).map((entity: any) => [entity.name, entity])
+                );
+
+                const isEntityPersistable = (entity: any, visited = new Set<string>()): boolean => {
+                    const generalization = entity.generalization;
+
+                    if (generalization?.$Type === "DomainModels$NoGeneralization") {
+                        return generalization.persistable !== false;
+                    }
+
+                    if (generalization?.$Type === "DomainModels$Generalization") {
+                        const parentRef = generalization.generalization;
+                        if (typeof parentRef !== "string") {
+                            return true;
+                        }
+
+                        const parentName = parentRef.includes(".") ? parentRef.split(".").pop() ?? parentRef : parentRef;
+
+                        if (visited.has(parentName)) {
+                            return true;
+                        }
+
+                        visited.add(parentName);
+                        const parentEntity = entitiesByName.get(parentName);
+                        if (!parentEntity) {
+                            return true;
+                        }
+
+                        return isEntityPersistable(parentEntity, visited);
+                    }
+
+                    return true;
+                };
+
+                const determineEntityType = (entity: any): EntityType => {
+                    const sourceType = entity.source?.$Type;
+
+                    if (sourceType === "DomainModels$QueryBasedRemoteEntitySource") {
+                        return "external";
+                    }
+
+                    if (sourceType === "DomainModels$OqlViewEntitySource") {
+                        return "view";
+                    }
+
+                    return isEntityPersistable(entity) ? "persistable" : "non-persistable";
+                };
+
                 const entities: EntityInfo[] = domainModelData.entities.map((entity: any) => {
                     const entityAssociations = allAssociations
                         .filter((a: any) => a.parent === entity.name)
@@ -127,8 +194,11 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({ componentCon
                             type: a.type
                         }));
 
+                    const entityType = determineEntityType(entity);
+
                     return {
                         name: entity.name,
+                        entityType,
                         attributes: entity.attributes.map((attr: any) => {
                             let typeName = "Unknown";
                             if (typeof attr.type === "string") {
@@ -231,6 +301,74 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({ componentCon
         return module.entities.length > 0;
     });
 
+    const flatEntities = filteredModules
+        .flatMap(module =>
+            module.entities.map(entity => ({
+                moduleName: module.moduleName,
+                domainModelId: module.domainModelId,
+                entity
+            }))
+        )
+        .sort((a, b) => {
+            const byEntityName = a.entity.name.localeCompare(b.entity.name);
+            if (byEntityName !== 0) {
+                return byEntityName;
+            }
+            return a.moduleName.localeCompare(b.moduleName);
+        });
+
+    const renderEntityNode = (
+        entity: EntityInfo,
+        entityKey: string,
+        domainModelId: string,
+        moduleName?: string
+    ) => {
+        const isEntityExpanded = expandedEntities.has(entityKey);
+        const hasChildren = entity.attributes.length > 0 || entity.associations.length > 0;
+
+        return (
+            <div key={entityKey} className="entity-node">
+                <div
+                    className={`entity-header ${hasChildren ? "expandable" : ""}`}
+                    onClick={() => hasChildren && toggleEntity(entityKey)}
+                    onDoubleClick={() => openDomainModel(domainModelId)}
+                    title="Double-click to open Domain Model"
+                >
+                    {hasChildren && (
+                        <span className={`tree-chevron ${isEntityExpanded ? "expanded" : ""}`}><ChevronIcon /></span>
+                    )}
+                    <span className="entity-icon"><TableIcon entityType={entity.entityType} /></span>
+                    <span className="entity-name">{entity.name}</span>
+                    {moduleName && <span className="entity-module-name">[{moduleName}]</span>}
+                </div>
+                {isEntityExpanded && (
+                    <div className="entity-children">
+                        {entity.attributes.map((attr) => (
+                            <div
+                                key={`${entityKey}.attr.${attr.name}`}
+                                className="attribute-row"
+                            >
+                                <span className="row-icon"><AttributeIcon /></span>
+                                <span className="attr-name">{attr.name}</span>
+                                <span className="attr-type">{attr.type}</span>
+                            </div>
+                        ))}
+                        {entity.associations.map((assoc) => (
+                            <div
+                                key={`${entityKey}.assoc.${assoc.name}`}
+                                className="association-row"
+                            >
+                                <span className="row-icon"><AssociationIcon /></span>
+                                <span className="assoc-name">{assoc.name}</span>
+                                <span className="assoc-target">→ {assoc.target}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     if (isLoading) {
         return (
             <div className="database-explorer">
@@ -253,87 +391,81 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({ componentCon
     return (
         <div className="database-explorer">
             <div className="header">
-                <div className="header-actions">
-                    <button onClick={expandAll} className="icon-btn" title="Expand All">⊞</button>
-                    <button onClick={collapseAll} className="icon-btn" title="Collapse All">⊟</button>
+                <div className="header-inner header-left">
+                    <button onClick={expandAll} className="icon-btn" title="Expand All" aria-label="Expand All">
+                        <img src={expandAllIcon} alt="" draggable={false} />
+                    </button>
+                    <button onClick={collapseAll} className="icon-btn" title="Collapse All" aria-label="Collapse All">
+                        <img src={collapseAllIcon} alt="" draggable={false} />
+                    </button>
+                    <span className="header-separator" aria-hidden="true" />
                 </div>
-                <div className="search-container">
-                    <span className="search-icon">🔍</span>
-                    <input
-                        type="text"
-                        className="search-input"
-                        placeholder="Search..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                    />
+
+                <div className="header-inner header-center">
+                    <div className="search-container">
+                        <span className="search-icon" aria-hidden="true">
+                            <img src={searchIcon} alt="" draggable={false} />
+                        </span>
+                        <input
+                            type="text"
+                            className="search-input"
+                            placeholder="Search..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                    </div>
+                    <span className="header-separator" aria-hidden="true" />
                 </div>
-                <button onClick={handleRefresh} className="icon-btn" title="Refresh">⟳</button>
+
+                <div className="header-inner header-right">
+                    <button
+                        onClick={() => setViewMode(prev => (prev === "grouped" ? "flat" : "grouped"))}
+                        className="icon-btn view-toggle-btn"
+                        title={viewMode === "grouped" ? "Switch to A-Z Entity List" : "Switch to Grouped by Module"}
+                        aria-label={viewMode === "grouped" ? "Switch to A-Z Entity List" : "Switch to Grouped by Module"}
+                    >
+                        <img
+                            src={viewMode === "grouped" ? groupedViewIcon : flatViewIcon}
+                            alt=""
+                            draggable={false}
+                        />
+                    </button>
+                    <button onClick={handleRefresh} className="icon-btn refresh-icon-btn" title="Refresh" aria-label="Refresh">⟳</button>
+                </div>
             </div>
             <div className="tree-container">
-                {filteredModules.map((module) => {
+                {viewMode === "grouped" && filteredModules.map((module) => {
                     const isModuleExpanded = expandedModules.has(module.moduleName);
                     return (
                         <div key={module.moduleName} className="module-node">
-                            <div 
-                                className="module-header"
+                            <div
+                                className={`module-header ${isModuleExpanded ? "expanded" : ""}`}
                                 onClick={() => toggleModule(module.moduleName)}
                             >
-                                <span className={`tree-chevron ${isModuleExpanded ? 'expanded' : ''}`}><ChevronIcon /></span>
+                                <span className={`tree-chevron ${isModuleExpanded ? "expanded" : ""}`}><ChevronIcon /></span>
                                 <span className="module-name">{module.moduleName}</span>
                             </div>
                             {isModuleExpanded && (
                                 <div className="module-children">
-                                    {module.entities.map((entity) => {
-                                        const entityKey = `${module.moduleName}.${entity.name}`;
-                                        const isEntityExpanded = expandedEntities.has(entityKey);
-                                        const hasChildren = entity.attributes.length > 0 || entity.associations.length > 0;
-                                        return (
-                                            <div key={entityKey} className="entity-node">
-                                                <div 
-                                                    className={`entity-header ${hasChildren ? 'expandable' : ''}`}
-                                                    onClick={() => hasChildren && toggleEntity(entityKey)}
-                                                    onDoubleClick={() => openDomainModel(module.domainModelId)}
-                                                    title="Double-click to open Domain Model"
-                                                >
-                                                    {hasChildren && (
-                                                        <span className={`tree-chevron ${isEntityExpanded ? 'expanded' : ''}`}><ChevronIcon /></span>
-                                                    )}
-                                                    <span className="entity-icon"><TableIcon /></span>
-                                                    <span className="entity-name">{entity.name}</span>
-                                                </div>
-                                                {isEntityExpanded && (
-                                                    <div className="entity-children">
-                                                        {entity.attributes.map((attr) => (
-                                                            <div 
-                                                                key={`${entityKey}.attr.${attr.name}`}
-                                                                className="attribute-row"
-                                                            >
-                                                                <span className="row-icon"><AttributeIcon /></span>
-                                                                <span className="attr-name">{attr.name}</span>
-                                                                <span className="attr-type">{attr.type}</span>
-                                                            </div>
-                                                        ))}
-                                                        {entity.associations.map((assoc) => (
-                                                            <div 
-                                                                key={`${entityKey}.assoc.${assoc.name}`}
-                                                                className="association-row"
-                                                            >
-                                                                <span className="row-icon"><AssociationIcon /></span>
-                                                                <span className="assoc-name">{assoc.name}</span>
-                                                                <span className="assoc-target">→ {assoc.target}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
+                                    {module.entities.map((entity) =>
+                                        renderEntityNode(
+                                            entity,
+                                            `${module.moduleName}.${entity.name}`,
+                                            module.domainModelId
+                                        )
+                                    )}
                                 </div>
                             )}
                         </div>
                     );
                 })}
-                {filteredModules.length === 0 && (
+
+                {viewMode === "flat" && flatEntities.map(({ moduleName, domainModelId, entity }) =>
+                    renderEntityNode(entity, `${moduleName}.${entity.name}`, domainModelId, moduleName)
+                )}
+
+                {((viewMode === "grouped" && filteredModules.length === 0) ||
+                    (viewMode === "flat" && flatEntities.length === 0)) && (
                     <div className="empty-state">
                         {searchQuery ? "No matches found." : "No entities found in the project."}
                     </div>

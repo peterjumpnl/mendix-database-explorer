@@ -126,6 +126,25 @@ await studioPro.ui.editors.editDocument(domainModelId);
 - [Editor API — Open a Document](https://docs.mendix.com/apidocs-mxsdk/apidocs/web-extensibility-api-11/editor-api/)
 - [Menu API](https://docs.mendix.com/apidocs-mxsdk/apidocs/web-extensibility-api-11/menu-api/)
 
+## Changelog
+
+### Version 1.1.0 - March 10, 2026
+
+- Added entity type detection for persistable, non-persistable, view entities and external entities with correct icons
+- Added grouped vs flat list toggle feature
+- Improved toolbar and search layout for better spacing, preventing overflow
+- Improved tree readability with visual consistency (row styling, indentation guides, and module labeling, svg icons)
+
+### Version 1.0.0 - Initial Release
+
+#### Core Features
+- Treeview navigation for domain model structure
+- Module, entity, attribute, and association browsing
+- Search functionality
+- Expand/collapse all controls
+- Double-click to open domain model
+- Auto-refresh capability
+
 ## License
 
 MIT
