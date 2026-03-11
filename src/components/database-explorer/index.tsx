@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ComponentContext, getStudioProApi, Primitives } from "@mendix/extensions-api";
 import "./database-explorer.css";
-import { EntityTree } from "./entity-tree";
-import { HeaderToolbar } from "./header-toolbar";
+import { EntityTree } from "./entity-tree/entity-tree";
+import { HeaderToolbar } from "./header-toolbar/header-toolbar";
 import { RenameRequest, ViewMode } from "./types";
 import { useDatabaseStructure } from "./use-database-structure";
 
@@ -17,6 +17,16 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({ componentCon
     const [viewMode, setViewMode] = useState<ViewMode>("grouped");
     const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
     const [expandedEntities, setExpandedEntities] = useState<Set<string>>(new Set());
+    const [hasInitializedExpansion, setHasInitializedExpansion] = useState(false);
+
+    useEffect(() => {
+        if (hasInitializedExpansion || modules.length === 0) {
+            return;
+        }
+
+        setExpandedModules(new Set(modules.map(module => module.moduleName)));
+        setHasInitializedExpansion(true);
+    }, [hasInitializedExpansion, modules]);
 
     const handleRefresh = () => {
         void reload();
@@ -129,6 +139,68 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({ componentCon
         }
     };
 
+    const handleMoveAttribute = async (
+        moduleName: string,
+        entityId: string,
+        attributeId: string,
+        toIndex: number
+    ): Promise<boolean> => {
+        try {
+            const [domainModel] = await studioPro.app.model.domainModels.loadAll(
+                (info: Primitives.UnitInfo) => info.moduleName === moduleName
+            );
+
+            if (!domainModel) {
+                await studioPro.ui.messageBoxes.show("error", "Move attribute failed", "Could not load domain model.");
+                return false;
+            }
+
+            const domainModelData = domainModel as any;
+            const entity = (domainModelData.entities ?? []).find((candidate: any) => candidate.$ID === entityId);
+
+            if (!entity) {
+                await studioPro.ui.messageBoxes.show("error", "Move attribute failed", "Entity not found in domain model.");
+                return false;
+            }
+
+            const attributes: any[] = entity.attributes ?? [];
+            const fromIndex = attributes.findIndex(candidate => candidate.$ID === attributeId);
+
+            if (fromIndex < 0 || toIndex < 0 || toIndex > attributes.length || fromIndex === toIndex) {
+                return false;
+            }
+
+            const insertIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+
+            if (insertIndex === fromIndex) {
+                return false;
+            }
+
+            await (studioPro.app.model.domainModels as any).applyChanges([
+                {
+                    type: "removeElement",
+                    unitId: domainModelData.$ID,
+                    elementId: attributeId
+                },
+                {
+                    type: "insertElement",
+                    unitId: domainModelData.$ID,
+                    targetId: entity.$ID,
+                    propertyName: "attributes",
+                    index: insertIndex,
+                    elementId: attributeId
+                }
+            ]);
+
+            await reload();
+            return true;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "Move attribute failed.";
+            await studioPro.ui.messageBoxes.show("error", "Move attribute failed", message);
+            return false;
+        }
+    };
+
     const filteredModules = useMemo(() => {
         const query = searchQuery.toLowerCase();
 
@@ -170,7 +242,7 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({ componentCon
         [filteredModules]
     );
 
-    if (isLoading) {
+    if (isLoading && modules.length === 0) {
         return (
             <div className="database-explorer">
                 <div className="loading">Loading database structure...</div>
@@ -210,6 +282,7 @@ export const DatabaseExplorer: React.FC<DatabaseExplorerProps> = ({ componentCon
                 onToggleEntity={toggleEntity}
                 onOpenDomainModel={openDomainModel}
                 onRenameRequest={handleRenameRequest}
+                onMoveAttribute={handleMoveAttribute}
                 searchQuery={searchQuery}
             />
         </div>

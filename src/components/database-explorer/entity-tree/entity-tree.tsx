@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AssociationIcon, AttributeIcon, ChevronIcon, TableIcon } from "./icons";
-import { EntityInfo, FlatEntityRow, ModuleData, RenameRequest, ViewMode } from "./types";
+import { AssociationIcon, AttributeIcon, ChevronIcon, TableIcon } from "../icons/icons";
+import { EntityInfo, FlatEntityRow, ModuleData, RenameRequest, ViewMode } from "../types";
 
 const NAME_PATTERN = /^[a-zA-Z0-9]+$/;
 
@@ -14,8 +14,22 @@ interface EntityTreeProps {
     onToggleEntity: (entityId: string) => void;
     onOpenDomainModel: (domainModelId: string) => void;
     onRenameRequest: (request: RenameRequest, newName: string) => Promise<boolean>;
+    onMoveAttribute: (moduleName: string, entityId: string, attributeId: string, toIndex: number) => Promise<boolean>;
     searchQuery: string;
 }
+
+type DraggingAttribute = {
+    moduleName: string;
+    entityId: string;
+    attributeId: string;
+};
+
+type DropPlacement = "before" | "after";
+
+type DropPosition = {
+    targetAttributeId: string;
+    placement: DropPlacement;
+};
 
 const getEntityItemKey = (entityId: string): string => `entity:${entityId}`;
 const getAttributeItemKey = (attributeId: string): string => `attribute:${attributeId}`;
@@ -35,6 +49,15 @@ const EntityNode: React.FC<{
     onCancelEditing: () => void;
     onToggleEntity: (entityId: string) => void;
     onOpenDomainModel: (domainModelId: string) => void;
+    onMoveAttribute: (moduleName: string, entityId: string, attributeId: string, toIndex: number) => Promise<boolean>;
+    draggingAttribute: DraggingAttribute | null;
+    dropPosition: DropPosition | null;
+    isDragging: boolean;
+    dropFeedbackAttributeId: string | null;
+    savingMoveAttributeId: string | null;
+    onStartAttributeDrag: (draggingAttribute: DraggingAttribute) => void;
+    onEndAttributeDrag: () => void;
+    onSetDropPosition: (dropPosition: DropPosition | null) => void;
     getEntityDisplayName: (entity: EntityInfo) => string;
     getAttributeDisplayName: (attributeId: string, fallbackName: string) => string;
     showModuleName?: boolean;
@@ -53,6 +76,15 @@ const EntityNode: React.FC<{
     onCancelEditing,
     onToggleEntity,
     onOpenDomainModel,
+    onMoveAttribute,
+    draggingAttribute,
+    dropPosition,
+    isDragging,
+    dropFeedbackAttributeId,
+    savingMoveAttributeId,
+    onStartAttributeDrag,
+    onEndAttributeDrag,
+    onSetDropPosition,
     getEntityDisplayName,
     getAttributeDisplayName,
     showModuleName
@@ -66,14 +98,22 @@ const EntityNode: React.FC<{
                 className={`entity-header ${hasChildren ? "expandable" : ""} ${selectedItemKey === entityItemKey ? "is-selected" : ""}`}
                 onClick={() => {
                     onSelectItem(entityItemKey);
-                    if (hasChildren) {
-                        onToggleEntity(entity.id);
-                    }
                 }}
                 onDoubleClick={() => onOpenDomainModel(domainModelId)}
                 title="Double-click to open Domain Model"
             >
-                {hasChildren && <span className={`tree-chevron ${isExpanded ? "expanded" : ""}`}><ChevronIcon /></span>}
+                {hasChildren && (
+                    <span
+                        className={`tree-chevron ${isExpanded ? "expanded" : ""}`}
+                        onClick={event => {
+                            event.stopPropagation();
+                            onSelectItem(entityItemKey);
+                            onToggleEntity(entity.id);
+                        }}
+                    >
+                        <ChevronIcon />
+                    </span>
+                )}
                 <span className="entity-icon"><TableIcon entityType={entity.entityType} /></span>
                 {editingItemKey === entityItemKey ? (
                     isSavingRename ? (
@@ -106,13 +146,57 @@ const EntityNode: React.FC<{
             </div>
             {isExpanded && (
                 <div className="entity-children">
-                    {entity.attributes.map(attr => {
+                    {entity.attributes.map((attr, index) => {
                         const attrItemKey = getAttributeItemKey(attr.id);
+                        const isDropLineBefore = dropPosition?.targetAttributeId === attr.id && dropPosition.placement === "before";
+                        const isDropLineAfter = dropPosition?.targetAttributeId === attr.id && dropPosition.placement === "after";
+                        const isDragSource = draggingAttribute?.attributeId === attr.id;
+
                         return (
                             <div
                                 key={attr.id}
-                                className={`attribute-row ${selectedItemKey === attrItemKey ? "is-selected" : ""}`}
+                                className={`attribute-row ${selectedItemKey === attrItemKey ? "is-selected" : ""} ${isDragging ? "is-dragging-active" : ""} ${isDragSource ? "is-drag-source" : ""} ${isDropLineBefore ? "drop-line-before" : ""} ${isDropLineAfter ? "drop-line-after" : ""} ${dropFeedbackAttributeId === attr.id ? "drop-feedback" : ""}`}
                                 onClick={() => onSelectItem(attrItemKey)}
+                                onDragOver={event => {
+                                    if (!draggingAttribute) {
+                                        return;
+                                    }
+
+                                    if (draggingAttribute.moduleName !== moduleName || draggingAttribute.entityId !== entity.id) {
+                                        return;
+                                    }
+
+                                    event.preventDefault();
+                                    const rect = event.currentTarget.getBoundingClientRect();
+                                    const placement: DropPlacement = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                                    onSetDropPosition({
+                                        targetAttributeId: attr.id,
+                                        placement
+                                    });
+                                }}
+                                onDragLeave={() => {
+                                    if (dropPosition?.targetAttributeId === attr.id) {
+                                        onSetDropPosition(null);
+                                    }
+                                }}
+                                onDrop={event => {
+                                    event.preventDefault();
+
+                                    if (!draggingAttribute) {
+                                        return;
+                                    }
+
+                                    if (draggingAttribute.moduleName !== moduleName || draggingAttribute.entityId !== entity.id) {
+                                        return;
+                                    }
+
+                                    const placement = dropPosition?.targetAttributeId === attr.id ? dropPosition.placement : "before";
+                                    const toIndex = placement === "before" ? index : index + 1;
+
+                                    onSetDropPosition(null);
+                                    onEndAttributeDrag();
+                                    void onMoveAttribute(moduleName, entity.id, draggingAttribute.attributeId, toIndex);
+                                }}
                             >
                                 <span className="row-icon"><AttributeIcon /></span>
                                 {editingItemKey === attrItemKey ? (
@@ -142,7 +226,31 @@ const EntityNode: React.FC<{
                                     <span className="attr-name">{getAttributeDisplayName(attr.id, attr.name)}</span>
                                 )}
                                 {editingItemKey === attrItemKey && isSavingRename && <span className="inline-rename-spinner" aria-hidden="true" />}
+                                {savingMoveAttributeId === attr.id && <span className="inline-rename-spinner" aria-hidden="true" />}
                                 <span className="attr-type">{attr.type}</span>
+                                <button
+                                    type="button"
+                                    className="attr-drag-handle"
+                                    title="Drag to reorder"
+                                    draggable
+                                    onDragStart={event => {
+                                        onSelectItem(attrItemKey);
+                                        onStartAttributeDrag({
+                                            moduleName,
+                                            entityId: entity.id,
+                                            attributeId: attr.id
+                                        });
+                                        event.dataTransfer.effectAllowed = "move";
+                                        event.dataTransfer.setData("text/plain", attr.id);
+                                    }}
+                                    onDragEnd={() => {
+                                        onSetDropPosition(null);
+                                        onEndAttributeDrag();
+                                    }}
+                                    onClick={event => event.stopPropagation()}
+                                >
+                                    ⋮⋮
+                                </button>
                             </div>
                         );
                     })}
@@ -184,14 +292,47 @@ export const EntityTree: React.FC<EntityTreeProps> = ({
     onToggleEntity,
     onOpenDomainModel,
     onRenameRequest,
+    onMoveAttribute,
     searchQuery
 }) => {
     const [selectedItemKey, setSelectedItemKey] = useState<string | null>(null);
     const [editingItemKey, setEditingItemKey] = useState<string | null>(null);
     const [editingValue, setEditingValue] = useState<string>("");
     const [isSavingRename, setIsSavingRename] = useState<boolean>(false);
+    const [draggingAttribute, setDraggingAttribute] = useState<DraggingAttribute | null>(null);
+    const [dropPosition, setDropPosition] = useState<DropPosition | null>(null);
+    const [savingMoveAttributeId, setSavingMoveAttributeId] = useState<string | null>(null);
+    const [dropFeedbackAttributeId, setDropFeedbackAttributeId] = useState<string | null>(null);
     const [entityNameOverrides, setEntityNameOverrides] = useState<Record<string, string>>({});
     const [attributeNameOverrides, setAttributeNameOverrides] = useState<Record<string, string>>({});
+
+    const moveAttribute = async (moduleName: string, entityId: string, attributeId: string, toIndex: number): Promise<boolean> => {
+        setSavingMoveAttributeId(attributeId);
+        const success = await onMoveAttribute(moduleName, entityId, attributeId, toIndex);
+        setSavingMoveAttributeId(null);
+
+        if (!success) {
+            return false;
+        }
+
+        setSelectedItemKey(getAttributeItemKey(attributeId));
+        setDropFeedbackAttributeId(attributeId);
+        return true;
+    };
+
+    useEffect(() => {
+        if (!dropFeedbackAttributeId) {
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            setDropFeedbackAttributeId(null);
+        }, 520);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [dropFeedbackAttributeId]);
 
     const renamableItems = useMemo(() => {
         const items = new Map<string, RenameRequest>();
@@ -306,10 +447,18 @@ export const EntityTree: React.FC<EntityTreeProps> = ({
                             className={`module-header ${isModuleExpanded ? "expanded" : ""} ${selectedItemKey === moduleItemKey ? "is-selected" : ""}`}
                             onClick={() => {
                                 setSelectedItemKey(moduleItemKey);
-                                onToggleModule(module.moduleName);
                             }}
                         >
-                            <span className={`tree-chevron ${isModuleExpanded ? "expanded" : ""}`}><ChevronIcon /></span>
+                            <span
+                                className={`tree-chevron ${isModuleExpanded ? "expanded" : ""}`}
+                                onClick={event => {
+                                    event.stopPropagation();
+                                    setSelectedItemKey(moduleItemKey);
+                                    onToggleModule(module.moduleName);
+                                }}
+                            >
+                                <ChevronIcon />
+                            </span>
                             <span className="module-name">{module.moduleName}</span>
                         </div>
 
@@ -337,6 +486,15 @@ export const EntityTree: React.FC<EntityTreeProps> = ({
                                         onCancelEditing={cancelEditing}
                                         onToggleEntity={onToggleEntity}
                                         onOpenDomainModel={onOpenDomainModel}
+                                        onMoveAttribute={moveAttribute}
+                                        draggingAttribute={draggingAttribute}
+                                        dropPosition={dropPosition}
+                                        isDragging={draggingAttribute !== null}
+                                        dropFeedbackAttributeId={dropFeedbackAttributeId}
+                                        savingMoveAttributeId={savingMoveAttributeId}
+                                        onStartAttributeDrag={setDraggingAttribute}
+                                        onEndAttributeDrag={() => setDraggingAttribute(null)}
+                                        onSetDropPosition={setDropPosition}
                                         getEntityDisplayName={entityNode => entityNameOverrides[entityNode.id] ?? entityNode.name}
                                         getAttributeDisplayName={(attributeId, fallbackName) =>
                                             attributeNameOverrides[attributeId] ?? fallbackName
@@ -371,6 +529,15 @@ export const EntityTree: React.FC<EntityTreeProps> = ({
                     onCancelEditing={cancelEditing}
                     onToggleEntity={onToggleEntity}
                     onOpenDomainModel={onOpenDomainModel}
+                    onMoveAttribute={moveAttribute}
+                    draggingAttribute={draggingAttribute}
+                    dropPosition={dropPosition}
+                    isDragging={draggingAttribute !== null}
+                    dropFeedbackAttributeId={dropFeedbackAttributeId}
+                    savingMoveAttributeId={savingMoveAttributeId}
+                    onStartAttributeDrag={setDraggingAttribute}
+                    onEndAttributeDrag={() => setDraggingAttribute(null)}
+                    onSetDropPosition={setDropPosition}
                     getEntityDisplayName={entityNode => entityNameOverrides[entityNode.id] ?? entityNode.name}
                     getAttributeDisplayName={(attributeId, fallbackName) =>
                         attributeNameOverrides[attributeId] ?? fallbackName

@@ -1,9 +1,9 @@
 import React from "react";
-import entityPersistableIcon from "./icons/EntityPersistable.svg";
-import entityNonPersistableIcon from "./icons/EntityNonPersistable.svg";
-import entityViewIcon from "./icons/EntityView.svg";
-import entityExternalIcon from "./icons/EntityExternal.svg";
-import { EntityType } from "./types";
+import entityPersistableIcon from "./EntityPersistable.svg";
+import entityNonPersistableIcon from "./EntityNonPersistable.svg";
+import entityViewIcon from "./EntityView.svg";
+import entityExternalIcon from "./EntityExternal.svg";
+import { EntityType } from "../types";
 
 export const TableIcon = ({ entityType }: { entityType: EntityType }) => {
     const iconByType: Record<EntityType, string> = {

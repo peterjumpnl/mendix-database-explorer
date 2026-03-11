@@ -131,6 +131,9 @@ await studioPro.ui.editors.editDocument(domainModelId);
 ### Version 1.2.0 - March 12, 2026
 
 - Inline renaming of entities and attributes
+- Drag and drop to reorder attributes
+- Default expanded modules to show entities
+- Only expand when user clicks on chevron
 - Refactored code to improve performance and maintainability
 
 ### Version 1.1.0 - March 10, 2026

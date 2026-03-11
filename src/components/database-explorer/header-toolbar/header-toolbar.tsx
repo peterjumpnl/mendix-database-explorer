@@ -1,10 +1,10 @@
 import React from "react";
-import collapseAllIcon from "./icons/CollapseAll.svg";
-import expandAllIcon from "./icons/ExpandAll.svg";
-import searchIcon from "./icons/Search.svg";
-import groupedViewIcon from "../../rows-2.svg";
-import flatViewIcon from "../../text-align-justify.svg";
-import { ViewMode } from "./types";
+import collapseAllIcon from "../icons/CollapseAll.svg";
+import expandAllIcon from "../icons/ExpandAll.svg";
+import searchIcon from "../icons/Search.svg";
+import groupedViewIcon from "../icons/GroupedList.svg";
+import flatViewIcon from "../icons/FlatList.svg";
+import { ViewMode } from "../types";
 
 interface HeaderToolbarProps {
     searchQuery: string;
