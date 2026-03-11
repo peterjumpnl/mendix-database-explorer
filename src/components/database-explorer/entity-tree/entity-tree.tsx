@@ -91,6 +91,7 @@ const EntityNode: React.FC<{
 }) => {
     const entityItemKey = getEntityItemKey(entity.id);
     const hasChildren = entity.attributes.length > 0 || entity.associations.length > 0;
+    const canReorderAttributes = entity.entityType !== "view";
 
     return (
         <div key={entity.id} className="entity-node">
@@ -158,6 +159,10 @@ const EntityNode: React.FC<{
                                 className={`attribute-row ${selectedItemKey === attrItemKey ? "is-selected" : ""} ${isDragging ? "is-dragging-active" : ""} ${isDragSource ? "is-drag-source" : ""} ${isDropLineBefore ? "drop-line-before" : ""} ${isDropLineAfter ? "drop-line-after" : ""} ${dropFeedbackAttributeId === attr.id ? "drop-feedback" : ""}`}
                                 onClick={() => onSelectItem(attrItemKey)}
                                 onDragOver={event => {
+                                    if (!canReorderAttributes) {
+                                        return;
+                                    }
+
                                     if (!draggingAttribute) {
                                         return;
                                     }
@@ -175,11 +180,19 @@ const EntityNode: React.FC<{
                                     });
                                 }}
                                 onDragLeave={() => {
+                                    if (!canReorderAttributes) {
+                                        return;
+                                    }
+
                                     if (dropPosition?.targetAttributeId === attr.id) {
                                         onSetDropPosition(null);
                                     }
                                 }}
                                 onDrop={event => {
+                                    if (!canReorderAttributes) {
+                                        return;
+                                    }
+
                                     event.preventDefault();
 
                                     if (!draggingAttribute) {
@@ -228,29 +241,31 @@ const EntityNode: React.FC<{
                                 {editingItemKey === attrItemKey && isSavingRename && <span className="inline-rename-spinner" aria-hidden="true" />}
                                 {savingMoveAttributeId === attr.id && <span className="inline-rename-spinner" aria-hidden="true" />}
                                 <span className="attr-type">{attr.type}</span>
-                                <button
-                                    type="button"
-                                    className="attr-drag-handle"
-                                    title="Drag to reorder"
-                                    draggable
-                                    onDragStart={event => {
-                                        onSelectItem(attrItemKey);
-                                        onStartAttributeDrag({
-                                            moduleName,
-                                            entityId: entity.id,
-                                            attributeId: attr.id
-                                        });
-                                        event.dataTransfer.effectAllowed = "move";
-                                        event.dataTransfer.setData("text/plain", attr.id);
-                                    }}
-                                    onDragEnd={() => {
-                                        onSetDropPosition(null);
-                                        onEndAttributeDrag();
-                                    }}
-                                    onClick={event => event.stopPropagation()}
-                                >
-                                    ⋮⋮
-                                </button>
+                                {canReorderAttributes && (
+                                    <button
+                                        type="button"
+                                        className="attr-drag-handle"
+                                        title="Drag to reorder"
+                                        draggable
+                                        onDragStart={event => {
+                                            onSelectItem(attrItemKey);
+                                            onStartAttributeDrag({
+                                                moduleName,
+                                                entityId: entity.id,
+                                                attributeId: attr.id
+                                            });
+                                            event.dataTransfer.effectAllowed = "move";
+                                            event.dataTransfer.setData("text/plain", attr.id);
+                                        }}
+                                        onDragEnd={() => {
+                                            onSetDropPosition(null);
+                                            onEndAttributeDrag();
+                                        }}
+                                        onClick={event => event.stopPropagation()}
+                                    >
+                                        ⋮⋮
+                                    </button>
+                                )}
                             </div>
                         );
                     })}
@@ -361,6 +376,16 @@ export const EntityTree: React.FC<EntityTreeProps> = ({
         return items;
     }, [filteredModules, entityNameOverrides, attributeNameOverrides]);
 
+    const beginEditing = (itemKey: string) => {
+        const renameRequest = renamableItems.get(itemKey);
+        if (!renameRequest || editingItemKey) {
+            return;
+        }
+
+        setEditingItemKey(itemKey);
+        setEditingValue(renameRequest.currentName);
+    };
+
     const commitEditing = async () => {
         if (!editingItemKey || isSavingRename) {
             return;
@@ -419,14 +444,8 @@ export const EntityTree: React.FC<EntityTreeProps> = ({
                 return;
             }
 
-            const renameRequest = renamableItems.get(selectedItemKey);
-            if (!renameRequest) {
-                return;
-            }
-
             event.preventDefault();
-            setEditingItemKey(selectedItemKey);
-            setEditingValue(renameRequest.currentName);
+            beginEditing(selectedItemKey);
         };
 
         window.addEventListener("keydown", onKeyDown);
