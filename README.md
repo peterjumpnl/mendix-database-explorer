@@ -128,6 +128,11 @@ await studioPro.ui.editors.editDocument(domainModelId);
 
 ## Changelog
 
+### Version 1.2.0 - March 12, 2026
+
+- Inline renaming of entities and attributes
+- Refactored code to improve performance and maintainability
+
 ### Version 1.1.0 - March 10, 2026
 
 - Added entity type detection for persistable, non-persistable, view entities and external entities with correct icons
