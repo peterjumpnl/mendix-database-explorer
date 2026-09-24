@@ -20,7 +20,7 @@ export const useDatabaseStructure = (componentContext: ComponentContext): UseDat
             setIsLoading(true);
             setError(null);
             const studioPro = getStudioProApi(componentContext) as unknown as ModelApi;
-            const moduleDataList = await loadModulesData(studioPro);
+            const moduleDataList = await loadModulesData(studioPro, componentContext);
             setModules(moduleDataList);
         } catch (err) {
             const message = err instanceof Error ? err.message : "Failed to load database structure";

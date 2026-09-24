@@ -1,4 +1,4 @@
-import { Primitives } from "@mendix/extensions-api";
+import { ComponentContext, getComponentFramework, IComponentApi, Primitives } from "@mendix/extensions-api";
 import { EntityInfo, EntityType, ModuleData } from "./types";
 
 type RawGeneralization = {
@@ -29,12 +29,16 @@ type RawDomainModel = {
     crossAssociations?: RawAssociation[];
 };
 
+type ModuleInfo = { name: string; fromAppStore?: boolean };
+
+type ModuleListingApi<TApiId extends string> = IComponentApi & {
+    _apiId: TApiId;
+    getModules: () => Promise<ReadonlyArray<ModuleInfo>>;
+};
+
 export type ModelApi = {
     app: {
         model: {
-            projects: {
-                getModules: () => Promise<Array<{ name: string; fromAppStore?: boolean }>>;
-            };
             domainModels: {
                 loadAll: (predicate: (info: Primitives.UnitInfo) => boolean) => Promise<unknown[]>;
             };
@@ -174,9 +178,30 @@ const buildModuleData = (moduleName: string, domainModel: RawDomainModel): Modul
     };
 };
 
-export const loadModulesData = async (studioPro: ModelApi): Promise<ModuleData[]> => {
-    const { domainModels, projects } = studioPro.app.model;
-    const allModules = await projects.getModules();
+// getModules moved from mendix.ProjectApi to mendix.ModuleApi in Studio Pro 11.9 and was removed
+// from ProjectApi in 11.11. Try the new API first and fall back so older Studio Pro versions keep working.
+const getAllModules = async (componentContext: ComponentContext): Promise<ReadonlyArray<ModuleInfo>> => {
+    const framework = getComponentFramework(componentContext);
+
+    try {
+        const moduleApi = framework.getApi<ModuleListingApi<"mendix.ModuleApi">>("mendix.ModuleApi");
+        return await moduleApi.getModules();
+    } catch (moduleApiError) {
+        try {
+            const projectApi = framework.getApi<ModuleListingApi<"mendix.ProjectApi">>("mendix.ProjectApi");
+            return await projectApi.getModules();
+        } catch (projectApiError) {
+            const describe = (err: unknown) => (err instanceof Error ? err.message : String(err));
+            throw new Error(
+                `Could not load modules. ModuleApi: ${describe(moduleApiError)}; ProjectApi: ${describe(projectApiError)}`
+            );
+        }
+    }
+};
+
+export const loadModulesData = async (studioPro: ModelApi, componentContext: ComponentContext): Promise<ModuleData[]> => {
+    const { domainModels } = studioPro.app.model;
+    const allModules = await getAllModules(componentContext);
 
     const candidateModules = allModules
         .filter(module => !module.fromAppStore && module.name !== "System")
